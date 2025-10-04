@@ -4,7 +4,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
@@ -37,14 +36,17 @@ export default function InstitutionBioData() {
   });
 
   useEffect(() => {
-    if (!profile?.institution_id) return;
+    if (!profile?.institution_id) {
+      setLoading(false);
+      return;
+    }
 
     const fetchInstitution = async () => {
       try {
         const { data, error } = await supabase
-          .from('institutions')
-          .select('*')
-          .eq('id', profile.institution_id)
+          .from("institutions")
+          .select("*")
+          .eq("id", profile.institution_id)
           .single();
 
         if (error) throw error;
@@ -71,7 +73,7 @@ export default function InstitutionBioData() {
           });
         }
       } catch (error: any) {
-        console.error('Error fetching institution:', error);
+        console.error("Error fetching institution:", error);
       } finally {
         setLoading(false);
       }
@@ -81,70 +83,103 @@ export default function InstitutionBioData() {
   }, [profile?.institution_id]);
 
   const handleInputChange = (field: string, value: string | boolean | File | null) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!profile?.institution_id) {
-      toast({
-        title: "Error",
-        description: "Institution not found",
-        variant: "destructive",
-      });
-      return;
-    }
 
     try {
       setIsSubmitting(true);
 
       let ownershipDocPath = null;
       if (formData.ownershipDocument) {
-        const fileExt = formData.ownershipDocument.name.split('.').pop();
-        const fileName = `${profile.institution_id}_ownership_${Date.now()}.${fileExt}`;
+        const fileExt = formData.ownershipDocument.name.split(".").pop();
+        const fileName = ${profile?.id}_ownership_${Date.now()}.${fileExt};
         const { data: uploadData, error: uploadError } = await supabase.storage
-          .from('receipts')
+          .from("ownership_docs") // ✅ use a dedicated bucket
           .upload(fileName, formData.ownershipDocument);
 
         if (uploadError) throw uploadError;
         ownershipDocPath = uploadData.path;
       }
 
-      const { error } = await supabase
-        .from('institutions')
-        .update({
-          type: formData.institutionType,
-          level: formData.institutionLevel,
-          county: formData.county,
-          subcounty: formData.subCounty,
-          ward: formData.ward,
-          zone: formData.zone,
-          education_system: formData.educationSystem,
-          kra_pin: formData.kraPin,
-          registration_no: formData.registrationNumber,
-          category: formData.category,
-          geo_lat: formData.latitude,
-          geo_lng: formData.longitude,
-          ownership: formData.ownership,
-          sbp_compliance: formData.sbpCompliance,
-          nearest_health: formData.nearestHealthFacility,
-          nearest_police: formData.nearestPoliceStation,
-          ...(ownershipDocPath && { ownership_doc: ownershipDocPath }),
-        })
-        .eq('id', profile.institution_id);
+      let institutionId = profile?.institution_id;
 
-      if (error) throw error;
+      if (!institutionId) {
+        // Insert new institution
+        const { data: newInst, error: insertError } = await supabase
+          .from("institutions")
+          .insert([
+            {
+              type: formData.institutionType,
+              level: formData.institutionLevel,
+              county: formData.county,
+              subcounty: formData.subCounty,
+              ward: formData.ward,
+              zone: formData.zone,
+              education_system: formData.educationSystem,
+              kra_pin: formData.kraPin,
+              registration_no: formData.registrationNumber,
+              category: formData.category,
+              geo_lat: formData.latitude,
+              geo_lng: formData.longitude,
+              ownership: formData.ownership,
+              sbp_compliance: formData.sbpCompliance,
+              nearest_health: formData.nearestHealthFacility,
+              nearest_police: formData.nearestPoliceStation,
+              ...(ownershipDocPath && { ownership_doc: ownershipDocPath }),
+            },
+          ])
+          .select()
+          .single();
+
+        if (insertError) throw insertError;
+
+        institutionId = newInst.id;
+
+        // Link institution to profile
+        await supabase
+          .from("profiles")
+          .update({ institution_id: institutionId })
+          .eq("id", profile?.id);
+      } else {
+        // Update existing institution
+        const { error } = await supabase
+          .from("institutions")
+          .update({
+            type: formData.institutionType,
+            level: formData.institutionLevel,
+            county: formData.county,
+            subcounty: formData.subCounty,
+            ward: formData.ward,
+            zone: formData.zone,
+            education_system: formData.educationSystem,
+            kra_pin: formData.kraPin,
+            registration_no: formData.registrationNumber,
+            category: formData.category,
+            geo_lat: formData.latitude,
+            geo_lng: formData.longitude,
+            ownership: formData.ownership,
+            sbp_compliance: formData.sbpCompliance,
+            nearest_health: formData.nearestHealthFacility,
+            nearest_police: formData.nearestPoliceStation,
+            ...(ownershipDocPath && { ownership_doc: ownershipDocPath }),
+          })
+          .eq("id", institutionId);
+
+        if (error) throw error;
+      }
 
       toast({
-        title: "Institution Bio-data Updated",
-        description: "Your institution information has been successfully saved.",
+        title: "Success",
+        description: "Institution bio-data saved successfully.",
       });
     } catch (error: any) {
-      console.error('Error updating institution:', error);
+      console.error(error);
       toast({
         title: "Error",
-        description: "Failed to save institution bio-data",
+        description: error.message || "Failed to save institution bio-data",
         variant: "destructive",
       });
     } finally {
@@ -161,12 +196,23 @@ export default function InstitutionBioData() {
   }
 
   const counties = [
-    "Nairobi", "Mombasa", "Kisumu", "Nakuru", "Uasin Gishu", "Kiambu", "Machakos", "Kajiado"
+    "Nairobi",
+    "Mombasa",
+    "Kisumu",
+    "Nakuru",
+    "Uasin Gishu",
+    "Kiambu",
+    "Machakos",
+    "Kajiado",
   ];
 
   const institutionTypes = [
-    "Public Primary School", "Private Primary School", "Public Secondary School", 
-    "Private Secondary School", "ECDE Center", "Vocational Training Institute"
+    "Public Primary School",
+    "Private Primary School",
+    "Public Secondary School",
+    "Private Secondary School",
+    "ECDE Center",
+    "Vocational Training Institute",
   ];
 
   return (
@@ -198,13 +244,20 @@ export default function InstitutionBioData() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="institutionType">Institution Type *</Label>
-                <Select onValueChange={(value) => handleInputChange("institutionType", value)}>
+                <Select
+                  value={formData.institutionType}
+                  onValueChange={(value) =>
+                    handleInputChange("institutionType", value)
+                  }
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select institution type" />
                   </SelectTrigger>
                   <SelectContent>
                     {institutionTypes.map((type) => (
-                      <SelectItem key={type} value={type}>{type}</SelectItem>
+                      <SelectItem key={type} value={type}>
+                        {type}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -212,7 +265,12 @@ export default function InstitutionBioData() {
 
               <div className="space-y-2">
                 <Label htmlFor="institutionLevel">Institution Level *</Label>
-                <Select onValueChange={(value) => handleInputChange("institutionLevel", value)}>
+                <Select
+                  value={formData.institutionLevel}
+                  onValueChange={(value) =>
+                    handleInputChange("institutionLevel", value)
+                  }
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select level" />
                   </SelectTrigger>
@@ -227,13 +285,20 @@ export default function InstitutionBioData() {
 
               <div className="space-y-2">
                 <Label htmlFor="educationSystem">Education System *</Label>
-                <Select onValueChange={(value) => handleInputChange("educationSystem", value)}>
+                <Select
+                  value={formData.educationSystem}
+                  onValueChange={(value) =>
+                    handleInputChange("educationSystem", value)
+                  }
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select education system" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="8-4-4">8-4-4 System</SelectItem>
-                    <SelectItem value="cbc">Competency Based Curriculum (CBC)</SelectItem>
+                    <SelectItem value="cbc">
+                      Competency Based Curriculum (CBC)
+                    </SelectItem>
                     <SelectItem value="igcse">IGCSE</SelectItem>
                     <SelectItem value="ib">International Baccalaureate</SelectItem>
                   </SelectContent>
@@ -242,7 +307,10 @@ export default function InstitutionBioData() {
 
               <div className="space-y-2">
                 <Label htmlFor="category">Category *</Label>
-                <Select onValueChange={(value) => handleInputChange("category", value)}>
+                <Select
+                  value={formData.category}
+                  onValueChange={(value) => handleInputChange("category", value)}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select category" />
                   </SelectTrigger>
@@ -261,17 +329,23 @@ export default function InstitutionBioData() {
                   id="kraPin"
                   placeholder="Enter KRA PIN"
                   value={formData.kraPin}
-                  onChange={(e) => handleInputChange("kraPin", e.target.value)}
+                  onChange={(e) =>
+                    handleInputChange("kraPin", e.target.value)
+                  }
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="registrationNumber">Registration Number *</Label>
+                <Label htmlFor="registrationNumber">
+                  Registration Number *
+                </Label>
                 <Input
                   id="registrationNumber"
                   placeholder="Enter registration number"
                   value={formData.registrationNumber}
-                  onChange={(e) => handleInputChange("registrationNumber", e.target.value)}
+                  onChange={(e) =>
+                    handleInputChange("registrationNumber", e.target.value)
+                  }
                   required
                 />
               </div>
@@ -294,13 +368,18 @@ export default function InstitutionBioData() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="county">County *</Label>
-                <Select onValueChange={(value) => handleInputChange("county", value)}>
+                <Select
+                  value={formData.county}
+                  onValueChange={(value) => handleInputChange("county", value)}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select county" />
                   </SelectTrigger>
                   <SelectContent>
                     {counties.map((county) => (
-                      <SelectItem key={county} value={county}>{county}</SelectItem>
+                      <SelectItem key={county} value={county}>
+                        {county}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -312,7 +391,9 @@ export default function InstitutionBioData() {
                   id="subCounty"
                   placeholder="Enter sub county"
                   value={formData.subCounty}
-                  onChange={(e) => handleInputChange("subCounty", e.target.value)}
+                  onChange={(e) =>
+                    handleInputChange("subCounty", e.target.value)
+                  }
                   required
                 />
               </div>
@@ -354,29 +435,39 @@ export default function InstitutionBioData() {
                   id="longitude"
                   placeholder="e.g., 36.817223"
                   value={formData.longitude}
-                  onChange={(e) => handleInputChange("longitude", e.target.value)}
+                  onChange={(e) =>
+                    handleInputChange("longitude", e.target.value)
+                  }
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="nearestHealthFacility">Nearest Health Facility</Label>
+                <Label htmlFor="nearestHealthFacility">
+                  Nearest Health Facility
+                </Label>
                 <Input
                   id="nearestHealthFacility"
                   placeholder="Name of nearest health facility"
                   value={formData.nearestHealthFacility}
-                  onChange={(e) => handleInputChange("nearestHealthFacility", e.target.value)}
+                  onChange={(e) =>
+                    handleInputChange("nearestHealthFacility", e.target.value)
+                  }
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="nearestPoliceStation">Nearest Police Station</Label>
+                <Label htmlFor="nearestPoliceStation">
+                  Nearest Police Station
+                </Label>
                 <Input
                   id="nearestPoliceStation"
                   placeholder="Name of nearest police station"
                   value={formData.nearestPoliceStation}
-                  onChange={(e) => handleInputChange("nearestPoliceStation", e.target.value)}
+                  onChange={(e) =>
+                    handleInputChange("nearestPoliceStation", e.target.value)
+                  }
                 />
               </div>
             </div>
@@ -397,7 +488,10 @@ export default function InstitutionBioData() {
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="ownership">Ownership Type *</Label>
-              <Select onValueChange={(value) => handleInputChange("ownership", value)}>
+              <Select
+                value={formData.ownership}
+                onValueChange={(value) => handleInputChange("ownership", value)}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select ownership type" />
                 </SelectTrigger>
@@ -414,7 +508,9 @@ export default function InstitutionBioData() {
               <Checkbox
                 id="sbpCompliance"
                 checked={formData.sbpCompliance}
-                onCheckedChange={(checked) => handleInputChange("sbpCompliance", checked as boolean)}
+                onCheckedChange={(checked) =>
+                  handleInputChange("sbpCompliance", checked as boolean)
+                }
               />
               <Label htmlFor="sbpCompliance">
                 SBP Compliance (School-Based Program compliance for private institutions)
@@ -423,15 +519,14 @@ export default function InstitutionBioData() {
 
             <div className="space-y-2">
               <Label htmlFor="ownershipDocument">Ownership Document</Label>
-              <div className="flex items-center space-x-2">
-                <Input
-                  id="ownershipDocument"
-                  type="file"
-                  accept=".pdf,.doc,.docx"
-                  onChange={(e) => handleInputChange("ownershipDocument", e.target.files?.[0] || null)}
-                  className="file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary-hover"
-                />
-              </div>
+              <Input
+                id="ownershipDocument"
+                type="file"
+                accept=".pdf,.doc,.docx"
+                onChange={(e) =>
+                  handleInputChange("ownershipDocument", e.target.files?.[0] || null)
+                }
+              />
               <p className="text-xs text-muted-foreground">
                 Upload certificate of registration, title deed, or other ownership documents (PDF, DOC, DOCX)
               </p>
@@ -441,7 +536,11 @@ export default function InstitutionBioData() {
 
         {/* Submit Button */}
         <div className="flex justify-end">
-          <Button type="submit" className="bg-gradient-primary hover:opacity-90" disabled={isSubmitting}>
+          <Button
+            type="submit"
+            className="bg-gradient-primary hover:opacity-90"
+            disabled={isSubmitting}
+          >
             <Save className="h-4 w-4 mr-2" />
             {isSubmitting ? "Saving..." : "Save Institution Bio-data"}
           </Button>
